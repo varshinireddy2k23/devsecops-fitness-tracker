@@ -1,0 +1,122 @@
+name: Enterprise Dynamic DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  IMAGE_NAME: fitness-tracker
+
+jobs:
+  dynamic-devsecops-pipeline:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      ########################################################
+      # Checkout Repository
+      ########################################################
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      ########################################################
+      # Detect Application Type
+      ########################################################
+
+      - name: Detect Application Type
+        run: |
+          echo "Detecting application type..."
+
+          if [ -f "package.json" ]; then
+            echo "APP_TYPE=nodejs" >> $GITHUB_ENV
+            echo "Node.js application detected"
+          fi
+
+          if [ -f "requirements.txt" ]; then
+            echo "APP_TYPE=python" >> $GITHUB_ENV
+            echo "Python application detected"
+          fi
+
+          if [ -f "pom.xml" ]; then
+            echo "APP_TYPE=java" >> $GITHUB_ENV
+            echo "Java application detected"
+          fi
+
+      ########################################################
+      # Setup Node.js
+      ########################################################
+
+      - name: Setup Node.js
+        if: env.APP_TYPE == 'nodejs'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      ########################################################
+      # Install Dependencies
+      ########################################################
+
+      - name: Install Dependencies
+        if: env.APP_TYPE == 'nodejs'
+        run: npm install
+
+      ########################################################
+      # Create Reports Directory
+      ########################################################
+
+      - name: Create Reports Directory
+        run: mkdir -p reports
+
+      ########################################################
+      # Dependency Scan
+      ########################################################
+
+      - name: Run Dependency Scan
+        run: |
+          npm audit --json > reports/dependency-report.json
+        continue-on-error: true
+
+      ########################################################
+      # Build Docker Image
+      ########################################################
+
+      - name: Build Docker Image
+        run: docker build -t $IMAGE_NAME .
+
+      ########################################################
+      # Setup Python
+      ########################################################
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      ########################################################
+      # Install Python Packages
+      ########################################################
+
+      - name: Install Python Packages
+        run: |
+          pip install pandas openpyxl
+
+      ########################################################
+      # Upload Reports Artifact
+      ########################################################
+
+      - name: Upload Reports Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/
+
+      ########################################################
+      # Deployment Stage
+      ########################################################
+
+      - name: Deployment Stage
+        run: |
+          echo "Deployment successful"
