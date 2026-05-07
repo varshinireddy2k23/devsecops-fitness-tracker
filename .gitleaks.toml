@@ -1,0 +1,9 @@
+title = "Gitleaks Config"
+
+[allowlist]
+description = "Ignore demo/example files"
+
+paths = [
+  '''.env.example''',
+  '''docker-compose.yml'''
+]
