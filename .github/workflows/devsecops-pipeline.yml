@@ -36,16 +36,19 @@ jobs:
 
         if [ -f "package.json" ]; then
           echo "APP_TYPE=nodejs" >> $GITHUB_ENV
+          echo "Node.js detected"
         elif [ -f "requirements.txt" ]; then
           echo "APP_TYPE=python" >> $GITHUB_ENV
+          echo "Python detected"
         elif [ -f "pom.xml" ]; then
           echo "APP_TYPE=java" >> $GITHUB_ENV
+          echo "Java detected"
         else
           echo "APP_TYPE=unknown" >> $GITHUB_ENV
         fi
 
     ########################################################
-    # Setup Node.js
+    # Setup Node.js (if needed)
     ########################################################
     - name: Setup Node.js
       if: env.APP_TYPE == 'nodejs'
@@ -58,59 +61,58 @@ jobs:
       run: npm install
 
     ########################################################
-    # Security Reports Folder
+    # Create Reports Folder
     ########################################################
     - name: Create Reports Directory
       run: mkdir -p reports
 
     ########################################################
-    # GITLEAKS
+    # GITLEAKS SCAN
     ########################################################
     - name: Run Gitleaks
       uses: gitleaks/gitleaks-action@v2
       continue-on-error: true
 
     ########################################################
-    # SEMGREP
+    # SEMGREP SAST
     ########################################################
-    - name: Run Semgrep SAST
+    - name: Run Semgrep
       uses: returntocorp/semgrep-action@v1
       continue-on-error: true
 
     ########################################################
-    # Dependency Scan
+    # Dependency Scan (Node only)
     ########################################################
-    - name: Run Dependency Scan
+    - name: Dependency Scan
       if: env.APP_TYPE == 'nodejs'
-      run: |
-        npm audit --json > reports/dependency-report.json
+      run: npm audit --json > reports/dependency-report.json
       continue-on-error: true
 
     ########################################################
-    # Docker Login
+    # DOCKER LOGIN (FIXED - TOKEN REQUIRED)
     ########################################################
     - name: DockerHub Login
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
 
     ########################################################
-    # Build Docker Image
+    # BUILD IMAGE
     ########################################################
     - name: Build Docker Image
       run: |
         docker build -t $DOCKER_IMAGE .
 
     ########################################################
-    # Push Docker Image (IMPORTANT FIX)
+    # PUSH IMAGE
     ########################################################
     - name: Push Docker Image
       run: |
         docker push $DOCKER_IMAGE
 
     ########################################################
-    # Trivy Scan (after image exists)
+    # TRIVY SCAN
     ########################################################
     - name: Run Trivy Scan
       uses: aquasecurity/trivy-action@master
@@ -121,7 +123,7 @@ jobs:
       continue-on-error: true
 
     ########################################################
-    # Checkov IaC Scan
+    # CHECKOV SCAN
     ########################################################
     - name: Run Checkov Scan
       uses: bridgecrewio/checkov-action@master
@@ -133,7 +135,7 @@ jobs:
       continue-on-error: true
 
     ########################################################
-    # Python Report Generator
+    # PYTHON REPORT GENERATION
     ########################################################
     - name: Setup Python
       uses: actions/setup-python@v5
@@ -148,7 +150,7 @@ jobs:
       continue-on-error: true
 
     ########################################################
-    # Upload Reports
+    # UPLOAD REPORTS
     ########################################################
     - name: Upload Reports
       uses: actions/upload-artifact@v4
@@ -167,7 +169,7 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     ########################################################
-    # KUBECTL SETUP
+    # SETUP KUBECTL
     ########################################################
     - name: Setup kubectl
       uses: azure/setup-kubectl@v4
@@ -175,7 +177,7 @@ jobs:
         version: latest
 
     ########################################################
-    # UPDATE KUBECONFIG (FIXED)
+    # UPDATE KUBECONFIG (FIXED INDENTATION)
     ########################################################
     - name: Update kubeconfig
       run: |
@@ -184,7 +186,7 @@ jobs:
           --name $EKS_CLUSTER_NAME
 
     ########################################################
-    # DEPLOY TO EKS (FIXED)
+    # DEPLOY TO EKS (FIXED INDENTATION)
     ########################################################
     - name: Deploy to EKS
       run: |
@@ -200,7 +202,7 @@ jobs:
         kubectl get deployments
 
     ########################################################
-    # SUCCESS
+    # SUCCESS MESSAGE
     ########################################################
-    - name: Success Message
+    - name: Success
       run: echo "DevSecOps Pipeline Completed Successfully"
