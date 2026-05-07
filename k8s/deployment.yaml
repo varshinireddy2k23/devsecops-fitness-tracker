@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: fitness-tracker
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: fitness-tracker
+
+  template:
+    metadata:
+      labels:
+        app: fitness-tracker
+
+    spec:
+      containers:
+      - name: fitness-tracker
+        image: varshinireddy19/fitness-tracker:latest
+        ports:
+        - containerPort: 5000
+
+        env:
+        - name: MONGO_URI
+          value: mongodb://mongodb:27017/fitness-tracker
