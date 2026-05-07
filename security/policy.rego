@@ -1,16 +1,15 @@
-package devsecops
+package kubernetes.security
 
-default allow = true
+deny contains msg if {
+    input.kind == "Deployment"
+    not input.spec.template.spec.securityContext.runAsNonRoot
 
-deny[msg] {
-    input.Results[_].Vulnerabilities[_].Severity == "CRITICAL"
-    vuln := input.Results[_].Vulnerabilities[_]
-    msg := sprintf("BLOCKED: CRITICAL vulnerability found: %s", [vuln.VulnerabilityID])
+    msg := "Container must not run as root"
 }
 
-deny[msg] {
-    vuln := input.Results[_].Vulnerabilities[_]
-    vuln.Severity == "HIGH"
-    not vuln.FixedVersion
-    msg := sprintf("BLOCKED: HIGH vulnerability without fix: %s", [vuln.VulnerabilityID])
+deny contains msg if {
+    input.kind == "Deployment"
+    not input.spec.template.spec.containers[_].resources.limits
+
+    msg := "Container must have resource limits"
 }
