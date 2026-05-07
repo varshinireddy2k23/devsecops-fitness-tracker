@@ -2,14 +2,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# Install dependencies first (better caching)
 COPY package*.json ./
-COPY server/package*.json ./server/
+RUN npm ci --omit=dev
 
-RUN npm install --omit=dev && \
-    cd server && npm install --omit=dev
-
+# Copy source
 COPY . .
 
 EXPOSE 5000
 
-CMD ["npm", "start"]
+CMD ["node", "server/app.js"]

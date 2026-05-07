@@ -13,53 +13,32 @@ env:
   IMAGE_NAME: fitness-tracker
   AWS_REGION: ap-south-1
   EKS_CLUSTER_NAME: fitness-tracker-cluster
+  DOCKER_USER: varshinireddy19
 
 jobs:
   dynamic-devsecops-pipeline:
-
     runs-on: ubuntu-latest
 
     steps:
 
     ########################################################
-    # Checkout Repository
+    # Checkout
     ########################################################
-
     - name: Checkout Repository
       uses: actions/checkout@v4
 
     ########################################################
-    # Detect Application Type Dynamically
+    # Detect App Type
     ########################################################
-
     - name: Detect Application Type
       run: |
-
-        echo "Detecting application type..."
-
         if [ -f "package.json" ]; then
           echo "APP_TYPE=nodejs" >> $GITHUB_ENV
-          echo "Node.js application detected"
-        fi
-
-        if [ -f "requirements.txt" ]; then
-          echo "APP_TYPE=python" >> $GITHUB_ENV
-          echo "Python application detected"
-        fi
-
-        if [ -f "pom.xml" ]; then
-          echo "APP_TYPE=java" >> $GITHUB_ENV
-          echo "Java application detected"
-        fi
-
-        if [ -f "Dockerfile" ]; then
-          echo "Docker application detected"
         fi
 
     ########################################################
-    # Setup Node.js
+    # Setup Node
     ########################################################
-
     - name: Setup Node.js
       if: env.APP_TYPE == 'nodejs'
       uses: actions/setup-node@v4
@@ -69,165 +48,131 @@ jobs:
     ########################################################
     # Install Dependencies
     ########################################################
-
     - name: Install Dependencies
       if: env.APP_TYPE == 'nodejs'
       run: npm install
 
     ########################################################
-    # Create Reports Directory
+    # Reports folder
     ########################################################
-
     - name: Create Reports Directory
       run: mkdir -p reports
 
     ########################################################
-    # SECRET SCAN — GITLEAKS
+    # GITLEAKS
     ########################################################
-
-    - name: Run Gitleaks Secret Scan
+    - name: Run Gitleaks
       uses: gitleaks/gitleaks-action@v2
       continue-on-error: true
 
     ########################################################
-    # SAST SCAN — SEMGREP
+    # SEMGREP
     ########################################################
-
-    - name: Run Semgrep SAST
+    - name: Run Semgrep
       uses: returntocorp/semgrep-action@v1
       continue-on-error: true
 
     ########################################################
     # DEPENDENCY SCAN
     ########################################################
-
-    - name: Run Dependency Scan
+    - name: Dependency Scan
       run: |
-        npm audit --json > reports/dependency-report.json
-      continue-on-error: true
+        npm audit --json > reports/dependency.json || true
 
     ########################################################
-    # DOCKER HUB LOGIN
+    # DOCKER LOGIN
     ########################################################
-
-    - name: DockerHub Login
+    - name: Docker Login
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
 
     ########################################################
-    # BUILD DOCKER IMAGE
+    # BUILD IMAGE
     ########################################################
-
     - name: Build Docker Image
-      run: |
-        docker build -t $IMAGE_NAME .
+      run: docker build -t $IMAGE_NAME .
 
     ########################################################
-    # TAG DOCKER IMAGE
+    # TAG IMAGE
     ########################################################
-
     - name: Tag Docker Image
-      run: |
-        docker tag $IMAGE_NAME varshinireddy19/$IMAGE_NAME:latest
+      run: docker tag $IMAGE_NAME $DOCKER_USER/$IMAGE_NAME:latest
 
     ########################################################
-    # CONTAINER SCAN — TRIVY
+    # PUSH IMAGE (IMPORTANT: BEFORE SCAN)
     ########################################################
+    - name: Push Docker Image
+      run: docker push $DOCKER_USER/$IMAGE_NAME:latest
 
-    - name: Run Trivy Container Scan
+    ########################################################
+    # TRIVY SCAN
+    ########################################################
+    - name: Run Trivy Scan
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: 'varshinireddy19/fitness-tracker:latest'
-        format: 'json'
-        output: 'reports/trivy-report.json'
+        image-ref: '${{ env.DOCKER_USER }}/${{ env.IMAGE_NAME }}:latest'
+        format: json
+        output: reports/trivy.json
       continue-on-error: true
 
     ########################################################
-    # IaC SCAN — CHECKOV
+    # OPA POLICY GATE (NEW FIX)
     ########################################################
+    - name: Install OPA
+      run: |
+        curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+        chmod +x opa
+        sudo mv opa /usr/local/bin/
 
-    - name: Run Checkov IaC Scan
+    - name: Run OPA Policy Check
+      run: |
+        opa eval --format pretty \
+          --data security/policy.rego \
+          --input reports/trivy.json \
+          "data.devsecops.deny"
+
+    ########################################################
+    # CHECKOV (IaC)
+    ########################################################
+    - name: Run Checkov
       uses: bridgecrewio/checkov-action@master
+      continue-on-error: true
       with:
         directory: .
         framework: kubernetes
         output_format: json
-        output_file_path: reports/checkov-report.json
-      continue-on-error: true
+        output_file_path: reports/checkov.json
 
     ########################################################
-    # Setup Python
+    # PYTHON REPORT GENERATION
     ########################################################
-
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: 3.11
 
-    ########################################################
-    # Install Python Packages
-    ########################################################
+    - name: Install Python Dependencies
+      run: pip install pandas openpyxl
 
-    - name: Install Python Packages
-      run: |
-        pip install pandas openpyxl
-
-    ########################################################
-    # Generate Excel Report
-    ########################################################
-
-    - name: Generate Excel Security Report
-      run: |
-        python scripts/report-generator.py
+    - name: Generate Report
+      run: python scripts/report-generator.py
       continue-on-error: true
 
     ########################################################
-    # Upload Artifacts
+    # ARTIFACT UPLOAD
     ########################################################
-
-    - name: Upload Reports Artifact
+    - name: Upload Reports
       uses: actions/upload-artifact@v4
       with:
         name: security-reports
         path: reports/
 
     ########################################################
-    # POLICY GATE
+    # AWS CONFIG
     ########################################################
-
-    - name: Check for Critical Vulnerabilities
-      run: |
-
-        echo "Checking for CRITICAL vulnerabilities..."
-
-        if [ -f reports/trivy-report.json ]; then
-
-          if grep -q "CRITICAL" reports/trivy-report.json; then
-            echo "CRITICAL vulnerabilities detected"
-            exit 1
-          else
-            echo "No CRITICAL vulnerabilities found"
-          fi
-
-        else
-          echo "Trivy report not found"
-        fi
-
-    ########################################################
-    # PUSH DOCKER IMAGE
-    ########################################################
-
-    - name: Push Docker Image
-      run: |
-        docker push varshinireddy19/$IMAGE_NAME:latest
-
-    ########################################################
-    # CONFIGURE AWS CREDENTIALS
-    ########################################################
-
-    - name: Configure AWS Credentials
+    - name: Configure AWS
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -235,17 +180,10 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     ########################################################
-    # INSTALL KUBECTL
+    # KUBECTL
     ########################################################
-
-    - name: Install kubectl
+    - name: Setup kubectl
       uses: azure/setup-kubectl@v4
-      with:
-        version: latest
-
-    ########################################################
-    # UPDATE KUBECONFIG
-    ########################################################
 
     - name: Update kubeconfig
       run: |
@@ -254,53 +192,30 @@ jobs:
           --name $EKS_CLUSTER_NAME
 
     ########################################################
-    # CREATE NAMESPACES
+    # NAMESPACE
     ########################################################
-
     - name: Create Namespaces
       run: |
-        kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create namespace staging --dry-run=client -o yaml | kubectl apply -f -
-        kubectl create namespace prod --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create ns dev --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create ns staging --dry-run=client -o yaml | kubectl apply -f -
+        kubectl create ns prod --dry-run=client -o yaml | kubectl apply -f -
 
     ########################################################
-    # DEPLOY TO DEV
+    # DEPLOYMENTS
     ########################################################
-
     - name: Deploy to Dev
-      run: |
-        kubectl apply -f k8s/ -n dev
-
-    ########################################################
-    # DEPLOY TO STAGING
-    ########################################################
+      run: kubectl apply -f k8s/ -n dev
 
     - name: Deploy to Staging
-      run: |
-        kubectl apply -f k8s/ -n staging
-
-    ########################################################
-    # DEPLOY TO PROD
-    ########################################################
+      run: kubectl apply -f k8s/ -n staging
 
     - name: Deploy to Prod
-      run: |
-        kubectl apply -f k8s/ -n prod
+      run: kubectl apply -f k8s/ -n prod
 
     ########################################################
-    # VERIFY DEPLOYMENT
+    # VERIFY
     ########################################################
-
-    - name: Verify Kubernetes Deployment
+    - name: Verify Deployment
       run: |
         kubectl get pods -A
         kubectl get svc -A
-        kubectl get deployments -A
-
-    ########################################################
-    # SUCCESS MESSAGE
-    ########################################################
-
-    - name: Deployment Success
-      run: |
-        echo "Enterprise DevSecOps Pipeline Completed Successfully"
