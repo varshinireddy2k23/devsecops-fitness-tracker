@@ -15,108 +15,209 @@ jobs:
 
     steps:
 
-      ########################################################
-      # Checkout Repository
-      ########################################################
+    ########################################################
+    # Checkout Code
+    ########################################################
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      ########################################################
-      # Detect Application Type
-      ########################################################
+    ########################################################
+    # Detect Application Type Dynamically
+    ########################################################
 
-      - name: Detect Application Type
-        run: |
-          echo "Detecting application type..."
+    - name: Detect Application Type
+      run: |
 
-          if [ -f "package.json" ]; then
-            echo "APP_TYPE=nodejs" >> $GITHUB_ENV
-            echo "Node.js application detected"
-          fi
+        echo "Detecting application type..."
 
-          if [ -f "requirements.txt" ]; then
-            echo "APP_TYPE=python" >> $GITHUB_ENV
-            echo "Python application detected"
-          fi
+        if [ -f "package.json" ]; then
+          echo "APP_TYPE=nodejs" >> $GITHUB_ENV
+          echo "Node.js application detected"
+        fi
 
-          if [ -f "pom.xml" ]; then
-            echo "APP_TYPE=java" >> $GITHUB_ENV
-            echo "Java application detected"
-          fi
+        if [ -f "requirements.txt" ]; then
+          echo "APP_TYPE=python" >> $GITHUB_ENV
+          echo "Python application detected"
+        fi
 
-      ########################################################
-      # Setup Node.js
-      ########################################################
+        if [ -f "pom.xml" ]; then
+          echo "APP_TYPE=java" >> $GITHUB_ENV
+          echo "Java application detected"
+        fi
 
-      - name: Setup Node.js
-        if: env.APP_TYPE == 'nodejs'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
+        if [ -f "Dockerfile" ]; then
+          echo "Docker application detected"
+        fi
 
-      ########################################################
-      # Install Dependencies
-      ########################################################
+    ########################################################
+    # Setup Node.js
+    ########################################################
 
-      - name: Install Dependencies
-        if: env.APP_TYPE == 'nodejs'
-        run: npm install
+    - name: Setup Node.js
+      if: env.APP_TYPE == 'nodejs'
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
 
-      ########################################################
-      # Create Reports Directory
-      ########################################################
+    ########################################################
+    # Install Dependencies
+    ########################################################
 
-      - name: Create Reports Directory
-        run: mkdir -p reports
+    - name: Install Dependencies
+      if: env.APP_TYPE == 'nodejs'
+      run: npm install
 
-      ########################################################
-      # Dependency Scan
-      ########################################################
+    ########################################################
+    # Create Reports Directory
+    ########################################################
 
-      - name: Run Dependency Scan
-        run: |
-          npm audit --json > reports/dependency-report.json
-        continue-on-error: true
+    - name: Create Reports Directory
+      run: mkdir -p reports
 
-      ########################################################
-      # Build Docker Image
-      ########################################################
+    ########################################################
+    # SECRET SCAN — GITLEAKS
+    ########################################################
 
-      - name: Build Docker Image
-        run: docker build -t $IMAGE_NAME .
+    - name: Run Gitleaks Secret Scan
+      id: gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      continue-on-error: true
 
-      ########################################################
-      # Setup Python
-      ########################################################
+    ########################################################
+    # SAST SCAN — SEMGREP
+    ########################################################
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Run Semgrep SAST
+      uses: returntocorp/semgrep-action@v1
+      continue-on-error: true
 
-      ########################################################
-      # Install Python Packages
-      ########################################################
+    ########################################################
+    # DEPENDENCY SCAN
+    ########################################################
 
-      - name: Install Python Packages
-        run: |
-          pip install pandas openpyxl
+    - name: Run Dependency Scan
+      run: |
+        npm audit --json > reports/dependency-report.json
+      continue-on-error: true
 
-      ########################################################
-      # Upload Reports Artifact
-      ########################################################
+    ########################################################
+    # BUILD DOCKER IMAGE
+    ########################################################
 
-      - name: Upload Reports Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-reports
-          path: reports/
+    - name: Build Docker Image
+      run: |
+        docker build -t $IMAGE_NAME .
 
-      ########################################################
-      # Deployment Stage
-      ########################################################
+    ########################################################
+    # CONTAINER SCAN — TRIVY
+    ########################################################
 
-      - name: Deployment Stage
-        run: |
-          echo "Deployment successful"
+    - name: Run Trivy Container Scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'fitness-tracker'
+        format: 'json'
+        output: 'reports/trivy-report.json'
+      continue-on-error: true
+
+    ########################################################
+    # IaC Scan — CHECKOV
+    ########################################################
+
+    - name: Run Checkov IaC Scan
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: kubernetes
+        output_format: json
+        output_file_path: reports/checkov-report.json
+      continue-on-error: true
+
+    ########################################################
+    # Install Python
+    ########################################################
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    ########################################################
+    # Install Excel Dependencies
+    ########################################################
+
+    - name: Install Python Packages
+      run: |
+        pip install pandas openpyxl
+
+    ########################################################
+    # Generate Excel Report
+    ########################################################
+
+    - name: Generate Excel Security Report
+      run: |
+        python scripts/report-generator.py
+
+    ########################################################
+    # Upload Artifacts
+    ########################################################
+
+    - name: Upload Reports Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: reports/
+
+    ########################################################
+    # POLICY GATE
+    ########################################################
+
+    - name: Break Pipeline if Critical Vulnerabilities Found
+      run: |
+
+        echo "Checking for CRITICAL vulnerabilities..."
+
+        if grep -q "CRITICAL" reports/trivy-report.json; then
+          echo "Critical vulnerabilities detected"
+          exit 1
+        fi
+
+    ########################################################
+    # EMAIL NOTIFICATION
+    ########################################################
+
+    - name: Send Failure Email
+      if: failure()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "DevSecOps Pipeline Failed"
+        body: "Critical vulnerabilities detected. Manual approval required."
+        to: yourmail@gmail.com
+        from: GitHub Actions
+
+    ########################################################
+    # MANUAL APPROVAL
+    ########################################################
+
+    - name: Manual Approval Required
+      if: failure()
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.TOKEN }}
+        approvers: varshinireddy2k23
+        minimum-approvals: 1
+        issue-title: "Critical Vulnerability Approval"
+        issue-body: "Critical vulnerabilities detected. Approve deployment?"
+
+    ########################################################
+    # MOCK DEPLOYMENT
+    ########################################################
+
+    - name: Deploy Application
+      run: |
+        echo "Deployment successful"
