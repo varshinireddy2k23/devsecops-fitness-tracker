@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+permissions:
+  contents: read
+  issues: write
 
 env:
   IMAGE_NAME: fitness-tracker
