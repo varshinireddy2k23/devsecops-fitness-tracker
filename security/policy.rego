@@ -9,7 +9,9 @@ deny contains msg if {
 
 deny contains msg if {
     input.kind == "Deployment"
-    not input.spec.template.spec.containers[_].resources.limits
+
+    container := input.spec.template.spec.containers[_]
+    not container.resources.limits
 
     msg := "Container must have resource limits"
 }
