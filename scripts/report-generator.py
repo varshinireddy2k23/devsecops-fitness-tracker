@@ -6,10 +6,9 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 REPORTS = {
-    "dependency-report.json": "OWASP Dependency Check",
+    "dependency-report.json": "npm",
     "trivy-report.json": "Trivy",
     "checkov-report.json": "Checkov",
-    "snyk-report.json": "Snyk",
     "gitleaks-report.json": "Gitleaks",
     "opa-report.json": "OPA Policy Gate"
 }
